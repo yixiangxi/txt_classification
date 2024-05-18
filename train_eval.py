@@ -5,6 +5,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from sklearn import metrics
 import time
+
+import matplotlib.pyplot as plt
+
 from utils import get_time_dif
 from tensorboardX import SummaryWriter
 
@@ -27,9 +30,15 @@ def init_network(model, method='xavier', exclude='embedding', seed=123):
 
 
 def train(config, model, train_iter, dev_iter, test_iter):
+    train_loss_list = []  # 用于保存训练集损失值的列表
+    train_acc_list = []  # 用于保存训练集准确率的列表
+    val_loss_list = []  # 用于保存验证集损失值的列表
+    val_acc_list = []  # 用于保存验证集准确率的列表
+
     start_time = time.time()
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
+    writer = SummaryWriter(log_dir=config.log_path)  # 创建SummaryWriter对象
 
     # 学习率指数衰减，每次epoch：学习率 = gamma * 学习率
     # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
@@ -53,6 +62,11 @@ def train(config, model, train_iter, dev_iter, test_iter):
                 predic = torch.max(outputs.data, 1)[1].cpu()
                 train_acc = metrics.accuracy_score(true, predic)
                 dev_acc, dev_loss = evaluate(config, model, dev_iter)
+                # 每100个batch记录一次指标
+                train_loss_list.append(loss.item())
+                train_acc_list.append(train_acc)
+                val_loss_list.append(dev_loss.item())  # 将验证集损失转换为标量
+                val_acc_list.append(dev_acc)
                 if dev_loss < dev_best_loss:
                     dev_best_loss = dev_loss
                     torch.save(model.state_dict(), config.save_path)
@@ -69,7 +83,34 @@ def train(config, model, train_iter, dev_iter, test_iter):
                 writer.add_scalar("acc/dev", dev_acc, total_batch)
                 model.train()
             total_batch += 1
-            if total_batch - last_improve > config.require_improvement:
+            # 训练结束后绘制图像
+            plt.figure(figsize=(10, 5))
+
+            # 绘制训练集损失值和验证集损失值随训练周期的变化趋势
+            plt.subplot(1, 2, 1)
+            plt.plot(train_loss_list, label='Train Loss')
+            plt.plot(val_loss_list, label='Validation Loss')
+            plt.xlabel('Epoch')
+            plt.ylabel('Loss')
+            plt.title('Training and Validation Loss')
+            plt.legend()
+
+            # 绘制训练集准确率和验证集准确率随训练周期的变化趋势
+            plt.subplot(1, 2, 2)
+            plt.plot(train_acc_list, label='Train Accuracy')
+            plt.plot(val_acc_list, label='Validation Accuracy')
+            plt.xlabel('Epoch')
+            plt.ylabel('Accuracy')
+            plt.title('Training and Validation Accuracy')
+            plt.legend()
+
+            # 保存图像
+            plt.savefig('training_metrics.png')
+
+            # 关闭图形窗口
+            plt.close()
+
+        if total_batch - last_improve > config.require_improvement:
                 # 验证集loss超过1000batch没下降，结束训练
                 print("No optimization for a long time, auto-stopping...")
                 flag = True
